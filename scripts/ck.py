@@ -113,6 +113,40 @@ def auto_hint(plate: Path, out_dir: Path, mode: str) -> Path:
     return out_dir
 
 
+def recipe(hint: Path, args) -> dict:
+    """What the results in Output/ depend on besides the plate."""
+    frames = sorted(f for f in hint.iterdir() if is_frame(f))
+    return {
+        "hint": str(hint.resolve()),
+        "hint_frames": len(frames),
+        "hint_mtime": max((int(f.stat().st_mtime) for f in frames), default=0),
+        "despill": args.despill,
+        "despeckle": not args.no_despeckle,
+        "despeckle_size": args.despeckle_size,
+        "linear": args.linear,
+    }
+
+
+def guard_stale_output(work: Path, hint: Path, args) -> None:
+    """Resume only results made with the same hint and settings; set older ones aside."""
+    import json
+
+    manifest = work / "ck_recipe.json"
+    current = recipe(hint, args)
+    output = work / "Output"
+    if output.exists() and manifest.exists():
+        try:
+            previous = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            previous = None
+        if previous != current:
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            aside = work / f"Output_prev_{stamp}"
+            output.rename(aside)
+            print(f"Hint or settings changed since the last run: previous results moved to {aside.name}", flush=True)
+    manifest.write_text(json.dumps(current, indent=2))
+
+
 def link(target: Path, link_path: Path) -> None:
     if link_path.is_symlink() or link_path.exists():
         if link_path.resolve() == target.resolve():
@@ -160,6 +194,8 @@ def main() -> None:
     linear = args.linear or any(f.suffix.lower() == ".exr" for f in plate.iterdir())
     check_readable(plate, "plate")
     check_readable(hint, "hint")
+
+    guard_stale_output(work, hint, args)
 
     from clip_manager import ClipEntry, InferenceSettings, run_inference
 
