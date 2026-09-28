@@ -1160,3 +1160,11 @@ class TestRunInferenceDriftWarning:
             )
 
         assert not any("looks like a" in m for m in caplog.messages), "drift warning must not fire on explicit color"
+
+
+def test_appledouble_files_are_not_frames():
+    """macOS writes '._name' metadata files next to frames on exFAT drives."""
+    from clip_manager import is_image_file
+
+    assert is_image_file("shot_0001.tif")
+    assert not is_image_file("._shot_0001.tif")

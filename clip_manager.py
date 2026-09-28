@@ -65,6 +65,9 @@ LINUX_MOUNT_ROOT = "/mnt/ssd-storage"
 
 # --- Helpers ---
 def is_image_file(filename: str) -> bool:
+    # "._name" files are macOS AppleDouble metadata on exFAT/FAT drives, not frames.
+    if os.path.basename(filename).startswith("."):
+        return False
     return filename.lower().endswith((".png", ".jpg", ".jpeg", ".exr", ".tif", ".tiff", ".bmp"))
 
 

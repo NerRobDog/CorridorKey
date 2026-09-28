@@ -390,5 +390,7 @@ def is_video_file(filename: str) -> bool:
 
 
 def is_image_file(filename: str) -> bool:
-    """Check if a filename has an image extension."""
+    """Check if a filename has an image extension (macOS "._" metadata files excluded)."""
+    if os.path.basename(filename).startswith("."):
+        return False
     return os.path.splitext(filename)[1].lower() in _IMAGE_EXTS

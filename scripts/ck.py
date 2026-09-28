@@ -36,8 +36,13 @@ def clean(p: str) -> Path:
     return path.resolve()
 
 
+def is_frame(f: Path) -> bool:
+    """Image files only; "._name" AppleDouble files that macOS writes on exFAT drives are not frames."""
+    return f.suffix.lower() in IMAGE_EXTS and not f.name.startswith(".")
+
+
 def has_frames(folder: Path) -> bool:
-    return folder.is_dir() and any(f.suffix.lower() in IMAGE_EXTS for f in folder.iterdir())
+    return folder.is_dir() and any(is_frame(f) for f in folder.iterdir())
 
 
 def frames_below(folder: Path, skip_hints: bool) -> Path | None:
@@ -77,7 +82,7 @@ def check_readable(folder: Path, label: str) -> None:
     """Fail early on truncated or unreadable frames instead of 'finishing' with no output."""
     import cv2
 
-    frames = sorted(f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    frames = sorted(f for f in folder.iterdir() if is_frame(f))
     for f in (frames[0], frames[-1]):
         if cv2.imread(str(f), cv2.IMREAD_UNCHANGED) is None:
             size_mb = f.stat().st_size / 1e6
@@ -98,7 +103,7 @@ def auto_hint(plate: Path, out_dir: Path, mode: str, test: bool) -> Path:
         from CorridorKeyModule.vision_hint import generate_hints
     except ImportError as exc:
         sys.exit(f"Apple Vision bindings missing ({exc}). Use the ck launcher, which adds them on macOS.")
-    frames = sorted(f for f in plate.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    frames = sorted(f for f in plate.iterdir() if is_frame(f))
     if test:
         frames = frames[:10]
     print(f"No hint folder: generating '{mode}' hints with Apple Vision -> {out_dir}", flush=True)
@@ -150,8 +155,8 @@ def main() -> None:
     else:
         link(hint, work / "AlphaHint")
 
-    n_plate = sum(1 for f in plate.iterdir() if f.suffix.lower() in IMAGE_EXTS)
-    n_hint = sum(1 for f in hint.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    n_plate = sum(1 for f in plate.iterdir() if is_frame(f))
+    n_hint = sum(1 for f in hint.iterdir() if is_frame(f))
     if n_plate != n_hint and not (args.test and n_hint >= min(10, n_plate)):
         sys.exit(f"Plate has {n_plate} frames but the hint has {n_hint}; they must match.")
     linear = args.linear or any(f.suffix.lower() == ".exr" for f in plate.iterdir())
