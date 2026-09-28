@@ -275,6 +275,12 @@ def main() -> None:
     if not args.auto_hint:
         check_hint(shot_dir / "AlphaHint")
 
+    output = shot_dir / "Output"
+    if output.exists():  # fresh plate and hint renders: never resume a key made from older ones
+        aside = shot_dir / f"Output_prev_{time.strftime('%Y%m%d-%H%M%S')}"
+        output.rename(aside)
+        print(f"Previous results moved to {aside.name}", flush=True)
+
     t0 = time.monotonic()
     run_corridorkey(args)
     print(f"CorridorKey finished in {time.monotonic() - t0:.0f} s.", flush=True)
