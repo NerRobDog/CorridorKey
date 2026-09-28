@@ -30,7 +30,10 @@ HINT_NAMES = ("alphahint", "hint", "mask", "matte")
 
 def clean(p: str) -> Path:
     """Paths dragged into a terminal can carry quotes, escaped spaces or a trailing slash."""
-    return Path(p.strip().strip("'\"").replace("\\ ", " ")).expanduser().resolve()
+    path = Path(p.strip().strip("'\"").replace("\\ ", " ")).expanduser()
+    if not path.is_absolute():  # relative to where the user typed `ck`, not the repo
+        path = Path(os.environ.get("CK_CALLER_CWD", os.getcwd())) / path
+    return path.resolve()
 
 
 def has_frames(folder: Path) -> bool:
