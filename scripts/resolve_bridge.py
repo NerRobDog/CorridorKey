@@ -136,6 +136,32 @@ def render_range(project, timeline, only_track: int, start: int, end: int, targe
     return flatten_images(target)
 
 
+def check_hint(folder: Path) -> None:
+    """A hint must be a white-on-black matte, not a copy of the plate (e.g. a Magic Mask sent to alpha)."""
+    import cv2
+    import numpy as np
+
+    frames = sorted(f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTS and not f.name.startswith("."))
+    img = cv2.imread(str(frames[len(frames) // 2]), cv2.IMREAD_UNCHANGED)
+    if img is None:
+        sys.exit(f"Cannot read hint frame {frames[len(frames) // 2]}")
+    img = img.astype(np.float32) / (65535.0 if img.dtype == np.uint16 else 255.0 if img.dtype == np.uint8 else 1.0)
+    if img.ndim == 3 and img.shape[2] >= 3:
+        rgb = img[:, :, :3]
+        colourful = float(np.abs(rgb - rgb.mean(axis=2, keepdims=True)).mean()) > 0.02
+        grey = rgb.mean(axis=2)
+    else:
+        colourful, grey = False, img.reshape(img.shape[0], img.shape[1])
+    mid = float(((grey > 0.1) & (grey < 0.9)).mean())
+    if colourful or mid > 0.25:
+        sys.exit(
+            f"The V2 render in {folder} does not look like a matte ({mid:.0%} mid-grey pixels"
+            f"{', colour' if colourful else ''}). Resolve rendered the picture, not the mask: in the V2 grade "
+            "turn the mask into RGB (white inside, black outside) instead of sending it to the alpha output, "
+            "or run with --auto-hint to let Apple Vision make the hint."
+        )
+
+
 def run_corridorkey(args) -> None:
     cmd = [
         "uv", "run", "--extra", "mlx", "python", "corridorkey_cli.py", "run-inference",
@@ -210,6 +236,7 @@ def main() -> None:
     if n_in != n_hint:
         sys.exit(f"Frame count mismatch: {n_in} plate frames vs {n_hint} hint frames.")
     print(f"Rendered {n_in} plate and hint frames.", flush=True)
+    check_hint(shot_dir / "AlphaHint")
 
     t0 = time.monotonic()
     run_corridorkey(args)
