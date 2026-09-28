@@ -207,7 +207,7 @@ def main() -> None:
     print(f"CorridorKey finished in {time.monotonic() - t0:.0f} s.", flush=True)
 
     media_pool = project.GetMediaPool()
-    clip, n_out = import_sequence(media_pool, shot_dir / "Processed")
+    clip, n_out = import_sequence(media_pool, shot_dir / "Output" / "Processed")
     for key, value in (("Alpha mode", "Premultiplied"), ("Input Color Space", "Rec.709 Linear")):
         clip.SetClipProperty(key, value)  # best effort: names vary between Resolve versions
 
