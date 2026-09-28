@@ -25,6 +25,7 @@ SAFETENSORS_EXT = ".safetensors"
 TORCH_EXTS = (SAFETENSORS_EXT, TORCH_EXT)
 MLX_EXT = ".safetensors"
 MLX_FILENAME_TOKEN = "mlx"
+MLX_WEIGHTS_FILENAME = "corridorkey_mlx.safetensors"
 DEFAULT_IMG_SIZE = 2048
 
 BACKEND_ENV_VAR = "CORRIDORKEY_BACKEND"
@@ -260,6 +261,33 @@ def _is_mlx_weights(path: str) -> bool:
     return MLX_FILENAME_TOKEN in os.path.basename(path).lower()
 
 
+def _has_torch_layout(path: str) -> bool:
+    """True if a .safetensors file holds the Torch key layout (refiner stem as nn.Sequential)."""
+    try:
+        from safetensors import safe_open
+
+        with safe_open(path, framework="numpy") as f:
+            keys = set(f.keys())
+    except Exception:  # noqa: BLE001 — unreadable/foreign file: let the loader report it
+        return False
+    return any(k.removeprefix("_orig_mod.") == "refiner.stem.0.weight" for k in keys)
+
+
+def _convert_torch_to_mlx(src: Path, dst: Path) -> Path:
+    """Convert a Torch CorridorKey checkpoint into MLX layout (conv transposes, key renames)."""
+    from corridorkey_mlx.convert.converter import convert_state_dict  # type: ignore[import-not-found]
+    from safetensors.numpy import save_file
+    from safetensors.torch import load_file
+
+    logger.info("Converting %s to MLX weights at %s (one-time)", src.name, dst)
+    state = {k.removeprefix("_orig_mod."): v.float().numpy() for k, v in load_file(str(src)).items()}
+    converted, _ = convert_state_dict(state)
+    tmp = dst.with_suffix(".tmp")
+    save_file(dict(converted), str(tmp))
+    os.replace(tmp, dst)
+    return dst
+
+
 def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
     """Find exactly one checkpoint for the requested backend and screen color.
 
@@ -313,6 +341,9 @@ def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
     matches = _filter_by_color(_find_single(ext), screen_color)
     # Torch .safetensors can sit next to the MLX weights; prefer files named as MLX weights.
     mlx_named = [p for p in matches if _is_mlx_weights(p)]
+    if not mlx_named and len(matches) == 1 and _has_torch_layout(matches[0]):
+        # No MLX weights published any more — build them from the Torch checkpoint once.
+        return _convert_torch_to_mlx(Path(matches[0]), Path(CHECKPOINT_DIR) / MLX_WEIGHTS_FILENAME)
     matches = mlx_named or matches
 
     if len(matches) == 0:

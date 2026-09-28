@@ -371,3 +371,53 @@ class TestMlxTorchCheckpointCoexistence:
     def test_blue_torch_unaffected(self, both):
         (both / "CorridorKeyBlue_1.0.safetensors").write_bytes(b"b")
         assert _discover_checkpoint(TORCH_EXT, screen_color="blue").name == "CorridorKeyBlue_1.0.safetensors"
+
+
+class TestMlxAutoConversion:
+    """The MLX weights are no longer published; they are built from the Torch checkpoint."""
+
+    def _torch_ckpt(self, path):
+        import numpy as np
+        from safetensors.numpy import save_file
+
+        save_file(
+            {
+                "refiner.stem.0.weight": np.ones((2, 3, 3, 3), np.float32),
+                "alpha_decoder.bn.num_batches_tracked": np.zeros((), np.int64),
+            },
+            str(path),
+        )
+
+    def test_torch_layout_is_converted_once(self, tmp_path):
+        import sys
+        import types
+
+        self._torch_ckpt(tmp_path / "CorridorKey_v1.0.safetensors")
+        fake = types.ModuleType("corridorkey_mlx.convert.converter")
+        fake.convert_state_dict = lambda sd: ({"refiner.stem_conv.weight": sd["refiner.stem.0.weight"]}, [])
+        modules = {
+            "corridorkey_mlx": types.ModuleType("corridorkey_mlx"),
+            "corridorkey_mlx.convert": types.ModuleType("corridorkey_mlx.convert"),
+            "corridorkey_mlx.convert.converter": fake,
+        }
+        with (
+            mock.patch.dict(sys.modules, modules),
+            mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)),
+        ):
+            first = _discover_checkpoint(MLX_EXT)
+            second = _discover_checkpoint(MLX_EXT)  # now finds the converted file directly
+
+        assert first.name == second.name == "corridorkey_mlx.safetensors"
+        from safetensors import safe_open
+
+        with safe_open(str(first), framework="numpy") as f:
+            assert list(f.keys()) == ["refiner.stem_conv.weight"]
+
+    def test_mlx_layout_file_is_used_as_is(self, tmp_path):
+        import numpy as np
+        from safetensors.numpy import save_file
+
+        ckpt = tmp_path / "weights.safetensors"
+        save_file({"refiner.stem_conv.weight": np.ones((1,), np.float32)}, str(ckpt))
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            assert _discover_checkpoint(MLX_EXT) == ckpt

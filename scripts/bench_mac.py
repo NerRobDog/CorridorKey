@@ -198,6 +198,7 @@ def bench_config(cfg, img, hint, args) -> tuple[dict, np.ndarray | None]:
     kwargs = {"input_is_linear": args.linear, "despill_strength": 1.0, "auto_despeckle": True}
     totals, model_times, post_times = [], [], []
     alpha = None
+    last_out = None
     try:
         for i in range(args.warmup + args.runs):
             t0 = time.perf_counter()
@@ -218,6 +219,7 @@ def bench_config(cfg, img, hint, args) -> tuple[dict, np.ndarray | None]:
             if i >= args.warmup:
                 totals.append(t2 - t0)
             alpha = out["alpha"][..., 0].astype(np.float32)
+            last_out = out
     except Exception as exc:  # noqa: BLE001
         result["error"] = f"run: {type(exc).__name__}: {exc}"
     finally:
@@ -232,7 +234,27 @@ def bench_config(cfg, img, hint, args) -> tuple[dict, np.ndarray | None]:
         result["post_s_median"] = round(float(np.median(post_times)), 3)
     if alpha is not None:
         result["alpha_levels"] = int(np.unique(alpha).size)
+        # What a farm worker would ship: input frame in, alpha + FG out, as half-float PIZ EXR.
+        in_mb = exr_mb(img) + exr_mb(hint)
+        out_mb = exr_mb(last_out["fg"]) + exr_mb(last_out["alpha"][..., 0])
+        result["transfer_in_mb"] = round(in_mb, 1)
+        result["transfer_out_mb"] = round(out_mb, 1)
+        if totals:
+            result["link_mb_s_needed"] = round((in_mb + out_mb) / float(np.median(totals)), 2)
     return result, alpha
+
+
+def exr_mb(arr: np.ndarray) -> float:
+    """Size of ``arr`` encoded as half-float PIZ EXR, in MB."""
+    params = [
+        cv2.IMWRITE_EXR_TYPE,
+        cv2.IMWRITE_EXR_TYPE_HALF,
+        cv2.IMWRITE_EXR_COMPRESSION,
+        cv2.IMWRITE_EXR_COMPRESSION_PIZ,
+    ]
+    data = np.ascontiguousarray(arr[..., ::-1] if arr.ndim == 3 else arr, dtype=np.float32)
+    ok, buf = cv2.imencode(".exr", data, params)
+    return buf.nbytes / 1e6 if ok else float("nan")
 
 
 def compare(alpha: np.ndarray, ref: np.ndarray) -> dict:
@@ -289,14 +311,14 @@ def main():
     }
     Path(args.out).write_text(json.dumps(report, indent=2, ensure_ascii=False))
 
-    print(f"\n{'config':28} {'frame s':>8} {'model s':>8} {'peak MB':>8} {'levels':>8} {'edge MAE':>9}")
+    print(f"\n{'config':28} {'frame s':>8} {'model s':>8} {'peak MB':>8} {'levels':>8} {'edge MAE':>9} {'MB/s':>6}")
     for r in results:
         peak = r.get("mlx_peak_mb") or r.get("mps_driver_peak_mb") or r.get("process_max_rss_mb")
         edge = r.get("alpha_edge_mae_vs_ref")
         print(
             f"{r['config']:28} {r.get('frame_s_median', '-')!s:>8} {r.get('model_s_median', '-')!s:>8} "
             f"{peak!s:>8} {r.get('alpha_levels', '-')!s:>8} {'' if edge is None else f'{edge:.5f}':>9}"
-            + (f"  ERROR {r['error']}" if "error" in r else "")
+            f" {r.get('link_mb_s_needed', '-')!s:>6}" + (f"  ERROR {r['error']}" if "error" in r else "")
         )
     print(f"\nreference: {ref_name}\nsaved {args.out}")
 
