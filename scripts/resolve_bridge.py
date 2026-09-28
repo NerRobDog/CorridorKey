@@ -174,6 +174,11 @@ def main() -> None:
     p.add_argument("--despill", type=float, default=5)
     p.add_argument("--despeckle-size", type=int, default=400)
     p.add_argument("--name", help="shot folder name (default: plate clip name)")
+    p.add_argument(
+        "--import-only",
+        action="store_true",
+        help="skip rendering and keying; just import an existing Output/Processed onto the out track",
+    )
     args = p.parse_args()
 
     resolve = connect()
@@ -196,6 +201,10 @@ def main() -> None:
     shot_dir = CLIPS_DIR / shot
     print(f"Shot '{shot}': timeline frames {start}-{end - 1} ({end - start} frames)", flush=True)
 
+    if args.import_only:
+        place_result(project, timeline, shot_dir, start, args.out_track)
+        return
+
     n_in = render_range(project, timeline, args.plate_track, start, end, shot_dir / "Input", shot)
     n_hint = render_range(project, timeline, args.hint_track, start, end, shot_dir / "AlphaHint", shot)
     if n_in != n_hint:
@@ -206,12 +215,16 @@ def main() -> None:
     run_corridorkey(args)
     print(f"CorridorKey finished in {time.monotonic() - t0:.0f} s.", flush=True)
 
+    place_result(project, timeline, shot_dir, start, args.out_track)
+
+
+def place_result(project, timeline, shot_dir: Path, start: int, out_track: int) -> None:
     media_pool = project.GetMediaPool()
     clip, n_out = import_sequence(media_pool, shot_dir / "Output" / "Processed")
     for key, value in (("Alpha mode", "Premultiplied"), ("Input Color Space", "Rec.709 Linear")):
         clip.SetClipProperty(key, value)  # best effort: names vary between Resolve versions
 
-    while timeline.GetTrackCount("video") < args.out_track:
+    while timeline.GetTrackCount("video") < out_track:
         timeline.AddTrack("video")
     placed = media_pool.AppendToTimeline(
         [
@@ -219,14 +232,14 @@ def main() -> None:
                 "mediaPoolItem": clip,
                 "startFrame": 0,
                 "endFrame": n_out - 1,
-                "trackIndex": args.out_track,
+                "trackIndex": out_track,
                 "recordFrame": start,
             }
         ]
     )
     if not placed:
         sys.exit("Imported the key but could not place it on the timeline; drag it from the media pool.")
-    print(f"Placed {n_out} keyed frames on V{args.out_track}.", flush=True)
+    print(f"Placed {n_out} keyed frames on V{out_track}.", flush=True)
 
 
 if __name__ == "__main__":
