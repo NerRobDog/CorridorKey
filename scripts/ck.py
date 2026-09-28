@@ -88,6 +88,28 @@ def check_readable(folder: Path, label: str) -> None:
             )
 
 
+def auto_hint(plate: Path, out_dir: Path, mode: str, test: bool) -> Path:
+    """Generate hints with Apple Vision into the work folder (macOS only)."""
+    if sys.platform != "darwin":
+        sys.exit("No alpha hint found, and automatic hints need macOS (Apple Vision).")
+    if out_dir.is_symlink():
+        out_dir.unlink()  # an earlier run linked a user hint here; replace it with generated frames
+    try:
+        from CorridorKeyModule.vision_hint import generate_hints
+    except ImportError as exc:
+        sys.exit(f"Apple Vision bindings missing ({exc}). Use the ck launcher, which adds them on macOS.")
+    frames = sorted(f for f in plate.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    if test:
+        frames = frames[:10]
+    print(f"No hint folder: generating '{mode}' hints with Apple Vision -> {out_dir}", flush=True)
+    t0 = time.monotonic()
+    written = generate_hints(
+        frames, out_dir, mode=mode, on_frame=lambda i, n: print(f"\r  hint {i + 1}/{n}", end="", flush=True)
+    )
+    print(f"\n  {written} hints in {time.monotonic() - t0:.0f} s", flush=True)
+    return out_dir
+
+
 def link(target: Path, link_path: Path) -> None:
     if link_path.is_symlink() or link_path.exists():
         if link_path.resolve() == target.resolve():
@@ -105,28 +127,32 @@ def main() -> None:
     p.add_argument("--no-despeckle", action="store_true")
     p.add_argument("--linear", action="store_true", help="plate is linear (default: auto, EXR = linear)")
     p.add_argument("--test", action="store_true", help="only the first 10 frames, to check the key")
+    p.add_argument(
+        "--auto-hint",
+        choices=("person", "objects"),
+        help="generate the hint with Apple Vision (default when no hint folder is found: person)",
+    )
     args = p.parse_args()
 
     shot = clean(args.plate)
     plate = plate_frames_dir(shot)
-    if args.hint:
-        hint = frames_below(clean(args.hint), skip_hints=False)
-    else:
-        hint = find_hint(shot)
-    if hint is None:
-        sys.exit(
-            "No alpha hint found. Put the white-on-black matte frames in a subfolder named AlphaHint "
-            f"inside {shot.name}, or pass the hint folder as the second argument."
-        )
-
     work = shot.parent / f"{shot.name}_CorridorKey"
     work.mkdir(exist_ok=True)
     link(plate, work / "Input")
-    link(hint, work / "AlphaHint")
+
+    hint = None
+    if args.hint:
+        hint = frames_below(clean(args.hint), skip_hints=False)
+    elif not args.auto_hint:
+        hint = find_hint(shot)
+    if hint is None:
+        hint = auto_hint(plate, work / "AlphaHint", args.auto_hint or "person", test=args.test)
+    else:
+        link(hint, work / "AlphaHint")
 
     n_plate = sum(1 for f in plate.iterdir() if f.suffix.lower() in IMAGE_EXTS)
     n_hint = sum(1 for f in hint.iterdir() if f.suffix.lower() in IMAGE_EXTS)
-    if n_plate != n_hint:
+    if n_plate != n_hint and not (args.test and n_hint >= min(10, n_plate)):
         sys.exit(f"Plate has {n_plate} frames but the hint has {n_hint}; they must match.")
     linear = args.linear or any(f.suffix.lower() == ".exr" for f in plate.iterdir())
     check_readable(plate, "plate")
