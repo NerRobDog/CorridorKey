@@ -67,10 +67,10 @@ def vision_mask(image_path: str | Path, mode: str = "person") -> np.ndarray:
     handler = Vision.VNImageRequestHandler.alloc().initWithURL_options_(url, {})
 
     if mode == "person":
-        request = Vision.VNGeneratePersonSegmentationRequest.alloc().init()
+        request = Vision.VNGeneratePersonSegmentationRequest.alloc().initWithCompletionHandler_(None)
         request.setQualityLevel_(Vision.VNGeneratePersonSegmentationRequestQualityLevelAccurate)
     else:
-        request = Vision.VNGenerateForegroundInstanceMaskRequest.alloc().init()
+        request = Vision.VNGenerateForegroundInstanceMaskRequest.alloc().initWithCompletionHandler_(None)
 
     ok, err = handler.performRequests_error_([request], None)
     if not ok:
