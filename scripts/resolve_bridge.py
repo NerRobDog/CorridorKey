@@ -3,13 +3,18 @@
 Timeline convention (all on the same frame range):
 
     V1  the green-screen plate
-    V2  the alpha hint: a copy of the plate graded to a white-on-black matte
+    V2  (skip with --auto-hint) the alpha hint: a copy of the plate graded to a white-on-black matte
         (e.g. a Magic Mask node, white inside / black outside)
     V3  the keyed result is placed here (created if missing)
 
 Run it from a terminal while Resolve Studio is open (external scripting needs Studio):
 
     uv run --extra mlx python scripts/resolve_bridge.py
+
+or, with the hint made by Apple Vision instead of V2:
+
+    uv run --extra mlx --with pyobjc-framework-Vision --with pyobjc-framework-Quartz \\
+        python scripts/resolve_bridge.py --auto-hint
 
 What it does, for the V1 clip under the playhead:
   1. renders the plate range with only V1 enabled  -> ClipsForInference/<shot>/Input/
@@ -162,6 +167,27 @@ def check_hint(folder: Path) -> None:
         )
 
 
+def vision_hints(plate_dir: Path, hint_dir: Path, mode: str) -> int:
+    """Make the hint from the rendered plate with Apple Vision; returns the hint frame count."""
+    sys.path.insert(0, str(REPO))
+    try:
+        from CorridorKeyModule.vision_hint import generate_hints
+    except ImportError as exc:
+        sys.exit(
+            f"Apple Vision bindings missing ({exc}). Run with: uv run --extra mlx "
+            "--with pyobjc-framework-Vision --with pyobjc-framework-Quartz python scripts/resolve_bridge.py --auto-hint"
+        )
+    if hint_dir.exists():
+        shutil.rmtree(hint_dir)  # a stale V2 render must not mix with generated hints
+    frames = sorted(f for f in plate_dir.iterdir() if f.suffix.lower() in IMAGE_EXTS and not f.name.startswith("."))
+    t0 = time.monotonic()
+    generate_hints(
+        frames, hint_dir, mode=mode, on_frame=lambda i, n: print(f"\r  hint {i + 1}/{n}", end="", flush=True)
+    )
+    print(f"\n  '{mode}' hints from Apple Vision in {time.monotonic() - t0:.0f} s", flush=True)
+    return len(frames)
+
+
 def run_corridorkey(args) -> None:
     cmd = [
         "uv", "run", "--extra", "mlx", "python", "corridorkey_cli.py", "run-inference",
@@ -205,6 +231,13 @@ def main() -> None:
         action="store_true",
         help="skip rendering and keying; just import an existing Output/Processed onto the out track",
     )
+    p.add_argument(
+        "--auto-hint",
+        nargs="?",
+        const="person",
+        choices=("person", "objects"),
+        help="no V2 needed: make the hint with Apple Vision (person, default, or objects)",
+    )
     args = p.parse_args()
 
     resolve = connect()
@@ -219,8 +252,8 @@ def main() -> None:
     if plate is None:
         sys.exit(f"No clip on V{args.plate_track} under the playhead.")
     start, end = plate.GetStart(), plate.GetEnd()
-    hint = item_at(timeline, args.hint_track, start)
-    if hint is None or hint.GetEnd() < end:
+    hint = None if args.auto_hint or args.import_only else item_at(timeline, args.hint_track, start)
+    if not (args.auto_hint or args.import_only) and (hint is None or hint.GetEnd() < end):
         sys.exit(f"V{args.hint_track} must hold the alpha-hint clip covering the whole plate range.")
 
     shot = args.name or safe_name(plate.GetName())
@@ -232,11 +265,15 @@ def main() -> None:
         return
 
     n_in = render_range(project, timeline, args.plate_track, start, end, shot_dir / "Input", shot)
-    n_hint = render_range(project, timeline, args.hint_track, start, end, shot_dir / "AlphaHint", shot)
+    if args.auto_hint:
+        n_hint = vision_hints(shot_dir / "Input", shot_dir / "AlphaHint", args.auto_hint)
+    else:
+        n_hint = render_range(project, timeline, args.hint_track, start, end, shot_dir / "AlphaHint", shot)
     if n_in != n_hint:
         sys.exit(f"Frame count mismatch: {n_in} plate frames vs {n_hint} hint frames.")
-    print(f"Rendered {n_in} plate and hint frames.", flush=True)
-    check_hint(shot_dir / "AlphaHint")
+    print(f"Have {n_in} plate and hint frames.", flush=True)
+    if not args.auto_hint:
+        check_hint(shot_dir / "AlphaHint")
 
     t0 = time.monotonic()
     run_corridorkey(args)
