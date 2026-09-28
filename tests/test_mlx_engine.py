@@ -164,3 +164,23 @@ def test_create_engine_mlx_uses_float_engine(tmp_path):
     ):
         assert backend.create_engine(backend="mlx", tile_size=768, overlap=32) is sentinel
     factory.assert_called_once_with(str(ckpt), img_size=2048, tile_size=768, overlap=32)
+
+
+def test_opaque_core_comes_from_plate_not_from_tiles():
+    """Per-tile colour drift must not reach the opaque core (the 6K grid artefact)."""
+    calls = {"n": 0}
+
+    def drifting_model(x):
+        calls["n"] += 1
+        rgb = x[0, :, :, :3] * IMAGENET_STD + IMAGENET_MEAN
+        return {"alpha": x[0, :, :, 3:4].copy(), "fg": rgb * (1.0 + 0.1 * calls["n"])}  # each tile brighter
+
+    h, w = 200, 300
+    image = np.full((h, w, 3), 0.4, np.float32)
+    mask = np.ones((h, w), np.float32)
+    mask[:, :50] = 0.5  # semi-transparent strip keeps the model's colour
+    engine = MLXFloatEngine(drifting_model, model_size=128, tiled=True, overlap=16)
+    pred = engine.predict(image, mask)
+
+    np.testing.assert_allclose(pred["fg"][:, 60:], 0.4, atol=1e-6)
+    assert not np.allclose(pred["fg"][:, :40], 0.4)

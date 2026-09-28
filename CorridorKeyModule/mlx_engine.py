@@ -109,6 +109,24 @@ def run_tiled(model_fn: ModelFn, x: np.ndarray, tile: int, overlap: int) -> dict
     return {"alpha": alpha_acc / weight_acc, "fg": fg_acc / weight_acc}
 
 
+CORE_ALPHA_LO = 0.90
+CORE_ALPHA_HI = 0.98
+
+
+def core_from_plate(fg: np.ndarray, alpha: np.ndarray, plate_srgb: np.ndarray) -> np.ndarray:
+    """Use the plate's own colour where the subject is opaque.
+
+    Where alpha is ~1 the screen does not show through, so the true foreground
+    colour *is* the plate pixel; the model is only needed to unmix
+    semi-transparent pixels. Taking the core from the plate removes the
+    per-tile brightness drift of tiled inference (visible as a grid on 6K
+    plates) and keeps full camera sharpness. Blends smoothly between
+    CORE_ALPHA_LO and CORE_ALPHA_HI. Despill still runs afterwards.
+    """
+    w = np.clip((alpha - CORE_ALPHA_LO) / (CORE_ALPHA_HI - CORE_ALPHA_LO), 0.0, 1.0)
+    return (fg * (1.0 - w) + plate_srgb[..., :3] * w).astype(np.float32, copy=False)
+
+
 def finalize_outputs(
     alpha: np.ndarray,
     fg: np.ndarray,
@@ -225,7 +243,8 @@ class MLXFloatEngine:
 
         if self.tiled:
             rgb = cu.linear_to_srgb(np.maximum(image, 0.0)) if input_is_linear else image
-            return run_tiled(self._model_fn, build_model_input(rgb, mask), self.model_size, self.overlap)
+            out = run_tiled(self._model_fn, build_model_input(rgb, mask), self.model_size, self.overlap)
+            return {"alpha": out["alpha"], "fg": core_from_plate(out["fg"], out["alpha"], rgb)}
 
         # Full frame: resize (in linear light when the input is linear), then encode to sRGB.
         size = (self.model_size, self.model_size)
@@ -238,7 +257,9 @@ class MLXFloatEngine:
         out = self._model_fn(build_model_input(rgb, hint))
         alpha = cv2.resize(out["alpha"], (w, h), interpolation=cv2.INTER_LANCZOS4)
         fg = cv2.resize(out["fg"], (w, h), interpolation=cv2.INTER_LANCZOS4)
-        return {"alpha": alpha.reshape(h, w, 1), "fg": fg}
+        alpha = alpha.reshape(h, w, 1)
+        plate = cu.linear_to_srgb(np.maximum(image, 0.0)) if input_is_linear else image
+        return {"alpha": alpha, "fg": core_from_plate(fg, alpha, plate)}
 
     def process_frame(
         self,
