@@ -37,24 +37,36 @@ def has_frames(folder: Path) -> bool:
     return folder.is_dir() and any(f.suffix.lower() in IMAGE_EXTS for f in folder.iterdir())
 
 
-def plate_frames_dir(folder: Path) -> Path:
-    """The folder with the plate frames: the folder itself, or its Input/ subfolder."""
+def frames_below(folder: Path, skip_hints: bool) -> Path | None:
+    """The single folder at or below ``folder`` that holds frames (Resolve nests renders in subfolders)."""
     if has_frames(folder):
         return folder
-    for name in ("Input", "input"):
-        if has_frames(folder / name):
-            return folder / name
-    sys.exit(f"No image frames found in {folder}")
+    found = [
+        d
+        for d in folder.rglob("*")
+        if d.is_dir()
+        and has_frames(d)
+        and not (skip_hints and any(part.lower() in HINT_NAMES for part in d.relative_to(folder).parts))
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def plate_frames_dir(folder: Path) -> Path:
+    """The folder with the plate frames: the folder itself or the one subfolder holding frames."""
+    plate = frames_below(folder, skip_hints=True)
+    if plate is None:
+        sys.exit(f"Expected exactly one folder of plate frames in {folder}")
+    return plate
 
 
 def find_hint(folder: Path) -> Path | None:
-    for sub in folder.iterdir():
-        if sub.is_dir() and sub.name.lower() in HINT_NAMES and has_frames(sub):
-            return sub
-    for name in (f"{folder.name}_hint", f"{folder.name}_mask", "AlphaHint", "Hint"):
-        cand = folder.parent / name
-        if has_frames(cand):
-            return cand
+    candidates = [d for d in folder.iterdir() if d.is_dir() and d.name.lower() in HINT_NAMES]
+    candidates += [folder.parent / n for n in (f"{folder.name}_hint", f"{folder.name}_mask", "AlphaHint", "Hint")]
+    for cand in candidates:
+        if cand.is_dir():
+            frames = frames_below(cand, skip_hints=False)
+            if frames:
+                return frames
     return None
 
 
@@ -79,8 +91,11 @@ def main() -> None:
 
     shot = clean(args.plate)
     plate = plate_frames_dir(shot)
-    hint = clean(args.hint) if args.hint else (find_hint(shot) or (find_hint(plate) if plate != shot else None))
-    if hint is None or not has_frames(hint):
+    if args.hint:
+        hint = frames_below(clean(args.hint), skip_hints=False)
+    else:
+        hint = find_hint(shot)
+    if hint is None:
         sys.exit(
             "No alpha hint found. Put the white-on-black matte frames in a subfolder named AlphaHint "
             f"inside {shot.name}, or pass the hint folder as the second argument."
