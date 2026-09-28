@@ -93,8 +93,8 @@ def check_readable(folder: Path, label: str) -> None:
             )
 
 
-def auto_hint(plate: Path, out_dir: Path, mode: str, test: bool) -> Path:
-    """Generate hints with Apple Vision into the work folder (macOS only)."""
+def auto_hint(plate: Path, out_dir: Path, mode: str) -> Path:
+    """Generate hints with Apple Vision for every frame (cheap next to keying), macOS only."""
     if sys.platform != "darwin":
         sys.exit("No alpha hint found, and automatic hints need macOS (Apple Vision).")
     if out_dir.is_symlink():
@@ -104,8 +104,6 @@ def auto_hint(plate: Path, out_dir: Path, mode: str, test: bool) -> Path:
     except ImportError as exc:
         sys.exit(f"Apple Vision bindings missing ({exc}). Use the ck launcher, which adds them on macOS.")
     frames = sorted(f for f in plate.iterdir() if is_frame(f))
-    if test:
-        frames = frames[:10]
     print(f"No hint folder: generating '{mode}' hints with Apple Vision -> {out_dir}", flush=True)
     t0 = time.monotonic()
     written = generate_hints(
@@ -151,13 +149,13 @@ def main() -> None:
     elif not args.auto_hint:
         hint = find_hint(shot)
     if hint is None:
-        hint = auto_hint(plate, work / "AlphaHint", args.auto_hint or "person", test=args.test)
+        hint = auto_hint(plate, work / "AlphaHint", args.auto_hint or "person")
     else:
         link(hint, work / "AlphaHint")
 
     n_plate = sum(1 for f in plate.iterdir() if is_frame(f))
     n_hint = sum(1 for f in hint.iterdir() if is_frame(f))
-    if n_plate != n_hint and not (args.test and n_hint >= min(10, n_plate)):
+    if n_plate != n_hint:
         sys.exit(f"Plate has {n_plate} frames but the hint has {n_hint}; they must match.")
     linear = args.linear or any(f.suffix.lower() == ".exr" for f in plate.iterdir())
     check_readable(plate, "plate")
