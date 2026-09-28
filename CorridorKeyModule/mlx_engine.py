@@ -190,9 +190,9 @@ class MLXFloatEngine:
     ) -> MLXFloatEngine:
         """Load the ``corridorkey_mlx`` GreenFormer and wrap it.
 
-        ``compile`` defaults to True for full-frame and False for tiled
-        inference, matching the upstream engine; tiles are always exactly
-        ``tile_size`` square, so fixed-shape compile is safe either way.
+        ``compile`` defaults to True: tiles are always exactly ``tile_size``
+        square, so a fixed-shape compile is safe, and on an M1 Pro it cut
+        tiled frame time by ~22% (bench_mac.py).
         """
         import mlx.core as mx  # type: ignore[import-not-found]
         from corridorkey_mlx.inference.pipeline import load_model  # type: ignore[import-not-found]
@@ -200,7 +200,7 @@ class MLXFloatEngine:
         tiled = bool(tile_size)
         model_size = int(tile_size) if tiled else img_size
         if compile is None:
-            compile = not tiled
+            compile = True
         model = load_model(checkpoint_path, img_size=model_size, compile=compile, slim=True)
 
         def model_fn(x: np.ndarray) -> dict[str, np.ndarray]:

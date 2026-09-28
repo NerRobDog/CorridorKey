@@ -361,7 +361,7 @@ def _discover_checkpoint(ext: str, screen_color: str = "green") -> Path:
     return Path(matches[0])
 
 
-DEFAULT_MLX_TILE_SIZE = 512
+DEFAULT_MLX_TILE_SIZE = 768  # bench (M1 Pro, 1080p): 768+compile 3.9 s vs 512 6.6 s per frame
 DEFAULT_MLX_TILE_OVERLAP = 64
 
 
