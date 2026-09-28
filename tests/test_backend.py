@@ -5,7 +5,6 @@ import logging
 import os
 from unittest import mock
 
-import numpy as np
 import pytest
 
 from CorridorKeyModule.backend import (
@@ -20,7 +19,6 @@ from CorridorKeyModule.backend import (
     TORCH_EXT,
     _discover_checkpoint,
     _ensure_torch_checkpoint,
-    _wrap_mlx_output,
     resolve_backend,
 )
 
@@ -339,21 +337,6 @@ class TestDiscoverCheckpoint:
             with pytest.raises(ValueError, match="screen_color"):
                 _discover_checkpoint(TORCH_EXT, screen_color="red")
 
-    def test_mlx_adapter_rejects_blue_screen_channel(self):
-        """If anyone reaches the MLX adapter directly with screen_channel != 1, raise instead of
-        silently keying with the wrong despill (the green-channel _wrap_mlx_output is the only
-        despill MLX has)."""
-        from CorridorKeyModule.backend import _MLXEngineAdapter
-
-        adapter = _MLXEngineAdapter.__new__(_MLXEngineAdapter)  # bypass __init__ — no MLX engine needed
-        adapter._engine = mock.MagicMock()
-        with pytest.raises(NotImplementedError, match="screen_channel"):
-            adapter.process_frame(
-                np.zeros((4, 4, 3), dtype=np.uint8),
-                np.zeros((4, 4), dtype=np.uint8),
-                screen_channel=2,
-            )
-
     def test_logging_on_download(self, tmp_path, caplog):
         """Info-level log messages emitted at download start and completion."""
         cached = tmp_path / "hf_cache" / HF_CHECKPOINT_FILENAME_SAFETENSORS
@@ -369,55 +352,22 @@ class TestDiscoverCheckpoint:
         assert any("saved" in msg.lower() for msg in caplog.messages)
 
 
-# --- _wrap_mlx_output ---
+class TestMlxTorchCheckpointCoexistence:
+    """Torch and MLX weights are both .safetensors and must be able to share checkpoints/."""
 
-
-class TestWrapMlxOutput:
     @pytest.fixture
-    def mlx_raw_output(self):
-        """Simulated MLX engine output: uint8."""
-        h, w = 64, 64
-        rng = np.random.default_rng(42)
-        return {
-            "alpha": rng.integers(0, 256, (h, w), dtype=np.uint8),
-            "fg": rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
-            "comp": rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
-            "processed": rng.integers(0, 256, (h, w, 3), dtype=np.uint8),
-        }
+    def both(self, tmp_path):
+        (tmp_path / "CorridorKey_v1.0.safetensors").write_bytes(b"t")
+        (tmp_path / "corridorkey_mlx.safetensors").write_bytes(b"m")
+        with mock.patch("CorridorKeyModule.backend.CHECKPOINT_DIR", str(tmp_path)):
+            yield tmp_path
 
-    def test_output_keys(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=True, despeckle_size=400)
-        assert set(result.keys()) == {"alpha", "fg", "comp", "processed"}
+    def test_torch_ignores_mlx_weights(self, both):
+        assert _discover_checkpoint(TORCH_EXT).name == "CorridorKey_v1.0.safetensors"
 
-    def test_alpha_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
-        assert result["alpha"].shape == (64, 64, 1)
-        assert result["alpha"].dtype == np.float32
-        assert result["alpha"].min() >= 0.0
-        assert result["alpha"].max() <= 1.0
+    def test_mlx_prefers_mlx_weights(self, both):
+        assert _discover_checkpoint(MLX_EXT).name == "corridorkey_mlx.safetensors"
 
-    def test_fg_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=0.0, auto_despeckle=False, despeckle_size=400)
-        assert result["fg"].shape == (64, 64, 3)
-        assert result["fg"].dtype == np.float32
-
-    def test_processed_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
-        assert result["processed"].shape == (64, 64, 4)
-        assert result["processed"].dtype == np.float32
-
-    def test_comp_shape_dtype(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
-        assert result["comp"].shape == (64, 64, 3)
-        assert result["comp"].dtype == np.float32
-
-    def test_value_ranges(self, mlx_raw_output):
-        result = _wrap_mlx_output(mlx_raw_output, despill_strength=1.0, auto_despeckle=False, despeckle_size=400)
-        # alpha and fg come from uint8 / 255 so strictly 0-1
-        for key in ("alpha", "fg"):
-            assert result[key].min() >= 0.0, f"{key} has negative values"
-            assert result[key].max() <= 1.0, f"{key} exceeds 1.0"
-        # comp/processed can slightly exceed 1.0 due to sRGB conversion + despill redistribution
-        # (same behavior as Torch engine — linear_to_srgb doesn't clamp)
-        for key in ("comp", "processed"):
-            assert result[key].min() >= 0.0, f"{key} has negative values"
+    def test_blue_torch_unaffected(self, both):
+        (both / "CorridorKeyBlue_1.0.safetensors").write_bytes(b"b")
+        assert _discover_checkpoint(TORCH_EXT, screen_color="blue").name == "CorridorKeyBlue_1.0.safetensors"

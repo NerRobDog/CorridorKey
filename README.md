@@ -361,6 +361,15 @@ uv run python corridorkey_cli.py run_inference --backend torch
 
 MLX uses img_size=2048 by default (same as Torch).
 
+The MLX path keeps the whole frame in float32: HDR and linear EXR input are preserved (linear input is
+encoded to sRGB before the model, like the Torch engine), and alpha/foreground come back as float — no 8-bit
+quantization. Torch and MLX weights can live side by side in `checkpoints/`: files with `mlx` in the name are
+used by MLX only and ignored by Torch.
+
+**Benchmarking on your Mac:** `uv run python scripts/bench_mac.py` compares configurations (Torch/MPS, MLX tile
+sizes, `mx.compile`) on one frame and reports latency, peak memory and alpha deviation from a reference. Pass
+`--frame plate.exr --hint hint.png --linear` to use real footage; results are saved to `bench_results.json`.
+
 ### Troubleshooting
 - **"No .safetensors checkpoint found"** — place MLX weights in `CorridorKeyModule/checkpoints/`
 - **"corridorkey_mlx not installed"** — run `uv sync --extra mlx`
