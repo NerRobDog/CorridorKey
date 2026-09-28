@@ -186,9 +186,9 @@ def release(engine, backend: str):
 def bench_config(cfg, img, hint, args) -> tuple[dict, np.ndarray | None]:
     result = {"config": cfg["name"]}
     mem = Memory(cfg["backend"])
-    mem.reset()
     t0 = time.perf_counter()
     try:
+        mem.reset()
         engine = build_engine(cfg, args.checkpoint_dir, args.device)
     except Exception as exc:  # noqa: BLE001 — report and move on to the next config
         result["error"] = f"load: {type(exc).__name__}: {exc}"
