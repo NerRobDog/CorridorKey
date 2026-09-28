@@ -73,6 +73,21 @@ def find_hint(folder: Path) -> Path | None:
     return None
 
 
+def check_readable(folder: Path, label: str) -> None:
+    """Fail early on truncated or unreadable frames instead of 'finishing' with no output."""
+    import cv2
+
+    frames = sorted(f for f in folder.iterdir() if f.suffix.lower() in IMAGE_EXTS)
+    for f in (frames[0], frames[-1]):
+        if cv2.imread(str(f), cv2.IMREAD_UNCHANGED) is None:
+            size_mb = f.stat().st_size / 1e6
+            sys.exit(
+                f"Cannot read {label} frame {f.name} ({size_mb:.2f} MB). The file looks truncated or in an "
+                "unsupported TIFF variant: re-render it (check free disk space), or render 16-bit TIFF "
+                "without compression, PNG 16-bit or EXR."
+            )
+
+
 def link(target: Path, link_path: Path) -> None:
     if link_path.is_symlink() or link_path.exists():
         if link_path.resolve() == target.resolve():
@@ -114,6 +129,8 @@ def main() -> None:
     if n_plate != n_hint:
         sys.exit(f"Plate has {n_plate} frames but the hint has {n_hint}; they must match.")
     linear = args.linear or any(f.suffix.lower() == ".exr" for f in plate.iterdir())
+    check_readable(plate, "plate")
+    check_readable(hint, "hint")
 
     from clip_manager import ClipEntry, InferenceSettings, run_inference
 
