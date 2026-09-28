@@ -15,6 +15,9 @@ from CorridorKeyModule.mlx_engine import (
     run_tiled,
     tile_coords,
 )
+from CorridorKeyModule.mlx_engine import (
+    build_model_input as build_input,
+)
 
 
 def passthrough_model(tile: int):
@@ -184,3 +187,40 @@ def test_opaque_core_comes_from_plate_not_from_tiles():
 
     np.testing.assert_allclose(pred["fg"][:, 60:], 0.4, atol=1e-6)
     assert not np.allclose(pred["fg"][:, :40], 0.4)
+
+
+class TestSkipEmptyTiles:
+    def _frame(self, h=600, w=1000):
+        image = np.random.default_rng(4).random((h, w, 3), dtype=np.float32)
+        mask = np.zeros((h, w), np.float32)
+        mask[200:400, 100:250] = 1.0  # subject on the left only
+        return image, mask
+
+    def test_empty_screen_tiles_are_not_computed(self):
+        seen = []
+
+        def model(x):
+            seen.append(x)
+            return passthrough_model(256)(x)
+
+        image, mask = self._frame()
+        engine = MLXFloatEngine(model, model_size=256, tiled=True, overlap=32)
+        pred = engine.predict(image, mask)
+
+        stats = engine.last_tile_stats
+        assert stats["skipped"] > 0 and len(seen) == stats["tiles"] - stats["skipped"]
+        assert pred["alpha"][:, 700:].max() == 0.0  # far right is pure screen
+        np.testing.assert_allclose(pred["alpha"][200:400, 100:250, 0], 1.0, atol=1e-6)
+
+    def test_skipping_does_not_change_the_subject(self):
+        image, mask = self._frame()
+        on = MLXFloatEngine(passthrough_model(256), model_size=256, tiled=True, overlap=32).predict(image, mask)
+        out = run_tiled(passthrough_model(256), build_input(image, mask[:, :, None]), 256, 32, skip_empty=False)
+        np.testing.assert_allclose(on["alpha"], out["alpha"], atol=1e-6)
+
+    def test_margin_keeps_tiles_near_the_subject(self):
+        image, mask = self._frame()
+        x = build_input(image, mask[:, :, None])
+        near = run_tiled(passthrough_model(256), x, 256, 32, skip_margin=0)["stats"]["skipped"]
+        far = run_tiled(passthrough_model(256), x, 256, 32, skip_margin=400)["stats"]["skipped"]
+        assert far < near

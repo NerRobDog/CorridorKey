@@ -81,32 +81,66 @@ def build_model_input(rgb_srgb: np.ndarray, hint: np.ndarray) -> np.ndarray:
     return np.concatenate([normalized, hint], axis=-1)[np.newaxis].astype(np.float32, copy=False)
 
 
-def run_tiled(model_fn: ModelFn, x: np.ndarray, tile: int, overlap: int) -> dict[str, np.ndarray]:
-    """Run ``model_fn`` on overlapping tiles of ``x`` and blend in float32."""
+SKIP_MARGIN = 96  # px around a tile that must also be hint-free before the tile is skipped
+SKIP_THRESHOLD = 1.0 / 255.0
+
+
+def run_tiled(
+    model_fn: ModelFn,
+    x: np.ndarray,
+    tile: int,
+    overlap: int,
+    skip_empty: bool = True,
+    skip_margin: int = SKIP_MARGIN,
+) -> dict[str, np.ndarray]:
+    """Run ``model_fn`` on overlapping tiles of ``x`` and blend in float32.
+
+    With ``skip_empty``, tiles whose alpha hint (channel 3) is empty in the tile
+    and ``skip_margin`` pixels around it are not sent to the model: they are
+    bare screen, so alpha is 0 there. The margin leaves room for detail the
+    model adds beyond a tight hint (flyaway hair). ``stats`` in the result
+    counts computed and skipped tiles.
+    """
     _, h, w, _ = x.shape
     ys = tile_coords(h, tile, overlap)
     xs = tile_coords(w, tile, overlap)
+    hint = x[0, :, :, 3]
+    plate = x[0, :, :, :3] * IMAGENET_STD + IMAGENET_MEAN
 
     alpha_acc = np.zeros((h, w, 1), dtype=np.float32)
     fg_acc = np.zeros((h, w, 3), dtype=np.float32)
     weight_acc = np.zeros((h, w, 1), dtype=np.float32)
+    skipped = 0
 
     for yi, (y0, y1) in enumerate(ys):
         wy = blend_ramp(y1 - y0, overlap, yi > 0, yi < len(ys) - 1)
         for xi, (x0, x1) in enumerate(xs):
             wx = blend_ramp(x1 - x0, overlap, xi > 0, xi < len(xs) - 1)
+            weight = (wy[:, None] * wx[None, :])[:, :, None]
+            if skip_empty:
+                region = hint[max(0, y0 - skip_margin) : y1 + skip_margin, max(0, x0 - skip_margin) : x1 + skip_margin]
+                if region.max() < SKIP_THRESHOLD:
+                    skipped += 1
+                    fg_acc[y0:y1, x0:x1] += plate[y0:y1, x0:x1] * weight
+                    weight_acc[y0:y1, x0:x1] += weight
+                    continue
             patch = x[:, y0:y1, x0:x1, :]
             ph, pw = tile - (y1 - y0), tile - (x1 - x0)
             if ph > 0 or pw > 0:
                 # Only happens when the frame is smaller than a tile on this axis.
                 patch = np.pad(patch, ((0, 0), (0, max(ph, 0)), (0, max(pw, 0)), (0, 0)), mode="edge")
             out = model_fn(patch)
-            weight = (wy[:, None] * wx[None, :])[:, :, None]
             alpha_acc[y0:y1, x0:x1] += out["alpha"][: y1 - y0, : x1 - x0] * weight
             fg_acc[y0:y1, x0:x1] += out["fg"][: y1 - y0, : x1 - x0] * weight
             weight_acc[y0:y1, x0:x1] += weight
 
-    return {"alpha": alpha_acc / weight_acc, "fg": fg_acc / weight_acc}
+    total = len(ys) * len(xs)
+    logger.debug("tiled inference: %d/%d tiles skipped as empty screen", skipped, total)
+    return {
+        "alpha": alpha_acc / weight_acc,
+        "fg": fg_acc / weight_acc,
+        "stats": {"tiles": total, "skipped": skipped},
+    }
 
 
 CORE_ALPHA_LO = 0.90
@@ -196,6 +230,7 @@ class MLXFloatEngine:
         self.tiled = tiled
         self.overlap = overlap
         self._refiner_warned = False
+        self.last_tile_stats: dict[str, int] | None = None
 
     @classmethod
     def from_checkpoint(
@@ -244,6 +279,7 @@ class MLXFloatEngine:
         if self.tiled:
             rgb = cu.linear_to_srgb(np.maximum(image, 0.0)) if input_is_linear else image
             out = run_tiled(self._model_fn, build_model_input(rgb, mask), self.model_size, self.overlap)
+            self.last_tile_stats = out["stats"]
             return {"alpha": out["alpha"], "fg": core_from_plate(out["fg"], out["alpha"], rgb)}
 
         # Full frame: resize (in linear light when the input is linear), then encode to sRGB.
