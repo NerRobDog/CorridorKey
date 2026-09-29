@@ -184,7 +184,7 @@ def vision_hints(plate_dir: Path, hint_dir: Path, mode: str) -> int:
     generate_hints(
         frames, hint_dir, mode=mode, on_frame=lambda i, n: print(f"\r  hint {i + 1}/{n}", end="", flush=True)
     )
-    print(f"\n  '{mode}' hints from Apple Vision in {time.monotonic() - t0:.0f} s", flush=True)
+    print(f"\n  '{mode}' hints in {time.monotonic() - t0:.0f} s", flush=True)
     return len(frames)
 
 
@@ -236,8 +236,9 @@ def main() -> None:
         "--auto-hint",
         nargs="?",
         const="person",
-        choices=("person", "objects"),
-        help="no V2 needed: make the hint with Apple Vision (person, default, or objects)",
+        choices=("person", "objects", "screen"),
+        help="no V2 needed: make the hint with Apple Vision (person, default, or objects) "
+        "or with a rough chroma key of the screen (screen)",
     )
     args = p.parse_args()
 

@@ -94,8 +94,8 @@ def check_readable(folder: Path, label: str) -> None:
 
 
 def auto_hint(plate: Path, out_dir: Path, mode: str) -> Path:
-    """Generate hints with Apple Vision for every frame (cheap next to keying), macOS only."""
-    if sys.platform != "darwin":
+    """Generate hints for every frame (cheap next to keying): Apple Vision (macOS) or a chroma key."""
+    if mode != "screen" and sys.platform != "darwin":
         sys.exit("No alpha hint found, and automatic hints need macOS (Apple Vision).")
     if out_dir.is_symlink():
         out_dir.unlink()  # an earlier run linked a user hint here; replace it with generated frames
@@ -104,7 +104,7 @@ def auto_hint(plate: Path, out_dir: Path, mode: str) -> Path:
     except ImportError as exc:
         sys.exit(f"Apple Vision bindings missing ({exc}). Use the ck launcher, which adds them on macOS.")
     frames = sorted(f for f in plate.iterdir() if is_frame(f))
-    print(f"No hint folder: generating '{mode}' hints with Apple Vision -> {out_dir}", flush=True)
+    print(f"No hint folder: generating '{mode}' hints -> {out_dir}", flush=True)
     t0 = time.monotonic()
     written = generate_hints(
         frames, out_dir, mode=mode, on_frame=lambda i, n: print(f"\r  hint {i + 1}/{n}", end="", flush=True)
@@ -166,8 +166,9 @@ def main() -> None:
     p.add_argument("--test", action="store_true", help="only the first 10 frames, to check the key")
     p.add_argument(
         "--auto-hint",
-        choices=("person", "objects"),
-        help="generate the hint with Apple Vision (default when no hint folder is found: person)",
+        choices=("person", "objects", "screen"),
+        help="generate the hint with Apple Vision (person, objects) or a rough chroma key (screen); "
+        "default when no hint folder is found: person",
     )
     args = p.parse_args()
 
