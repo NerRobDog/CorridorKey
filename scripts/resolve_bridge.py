@@ -196,7 +196,8 @@ def run_corridorkey(args) -> None:
         "--refiner", "1", "--no-comp", "--cpu-post", "--skip-existing",
     ]  # fmt: skip
     print("Running:", " ".join(cmd), flush=True)
-    subprocess.run(cmd, cwd=REPO, check=True)
+    env = {k: v for k, v in os.environ.items() if k != "VIRTUAL_ENV"}  # uv run --with sets a temp one
+    subprocess.run(cmd, cwd=REPO, check=True, env=env)
 
 
 def import_sequence(media_pool, folder: Path):
@@ -288,11 +289,32 @@ def main() -> None:
     place_result(project, timeline, shot_dir, start, args.out_track)
 
 
+# Property names and values differ between Resolve versions and colour-management modes; try each, keep what sticks.
+CLIP_TAGS = (
+    ("Alpha mode", ("Premultiplied",)),
+    ("Input Color Space", ("Rec.709 Linear", "Linear", "Rec.709 (Scene) Linear")),
+    ("Input Gamma", ("Linear",)),
+)
+
+
+def tag_linear(clip) -> None:
+    """Tag the imported EXRs as linear Rec.709 premultiplied, so nobody has to fix the gamma by hand."""
+    for key, values in CLIP_TAGS:
+        before = clip.GetClipProperty(key)
+        if before is None or before == "":
+            continue  # this Resolve/project has no such attribute
+        for value in values:
+            if clip.SetClipProperty(key, value) and clip.GetClipProperty(key) == value:
+                print(f"  {key}: {value}", flush=True)
+                break
+        else:
+            print(f"  {key}: could not set (stays '{clip.GetClipProperty(key)}'), set it to Linear by hand", flush=True)
+
+
 def place_result(project, timeline, shot_dir: Path, start: int, out_track: int) -> None:
     media_pool = project.GetMediaPool()
     clip, n_out = import_sequence(media_pool, shot_dir / "Output" / "Processed")
-    for key, value in (("Alpha mode", "Premultiplied"), ("Input Color Space", "Rec.709 Linear")):
-        clip.SetClipProperty(key, value)  # best effort: names vary between Resolve versions
+    tag_linear(clip)
 
     while timeline.GetTrackCount("video") < out_track:
         timeline.AddTrack("video")
