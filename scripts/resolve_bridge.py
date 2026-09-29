@@ -308,7 +308,8 @@ def tag_linear(clip) -> None:
                 print(f"  {key}: {value}", flush=True)
                 break
         else:
-            print(f"  {key}: could not set (stays '{clip.GetClipProperty(key)}'), set it to Linear by hand", flush=True)
+            now = clip.GetClipProperty(key)
+            print(f"  {key}: could not set (stays '{now}'), set it to {values[0]} by hand", flush=True)
 
 
 def place_result(project, timeline, shot_dir: Path, start: int, out_track: int) -> None:
