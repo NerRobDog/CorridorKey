@@ -309,8 +309,8 @@ def _has(clip, key: str) -> bool:
     return clip.GetClipProperty(key) not in (None, "")
 
 
-def tag_linear(clip) -> None:
-    """Tag the imported EXRs as linear Rec.709 premultiplied, so nobody has to fix the gamma by hand."""
+def tag_linear(clip) -> bool:
+    """Tag the imported EXRs as linear Rec.709 premultiplied; False if Resolve kept a display gamma."""
     if _has(clip, "Alpha mode"):
         _set_first(clip, "Alpha mode", ("Premultiplied",))
     if _has(clip, "Input Gamma"):
@@ -319,14 +319,48 @@ def tag_linear(clip) -> None:
             _set_first(clip, "Input Color Space", PRIMARIES)
             if clip.GetClipProperty("Input Gamma") not in LINEAR_GAMMAS:  # setting primaries may reset gamma
                 _set_first(clip, "Input Gamma", LINEAR_GAMMAS)
-    elif _has(clip, "Input Color Space"):
-        _set_first(clip, "Input Color Space", COMBINED_SPACES)
+        return clip.GetClipProperty("Input Gamma") in LINEAR_GAMMAS
+    if _has(clip, "Input Color Space"):
+        return _set_first(clip, "Input Color Space", COMBINED_SPACES)
+    return True
+
+
+def bake_gamma(src: Path, dst: Path, gamma: float = 2.4) -> None:
+    """Linear premultiplied EXRs -> the same frames encoded with ``gamma`` (still premultiplied).
+
+    Used when Resolve will not accept a linear tag through the API: the frames then already
+    carry the gamma Resolve assumes, so they look right without touching Clip Attributes.
+    """
+    os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+    import cv2
+    import numpy as np
+
+    dst.mkdir(parents=True, exist_ok=True)
+    files = sorted(src.glob("*.exr"))
+    for i, f in enumerate(files):
+        out = dst / f.name
+        if out.exists() and out.stat().st_mtime >= f.stat().st_mtime:
+            continue
+        img = cv2.imread(str(f), cv2.IMREAD_UNCHANGED).astype(np.float32)
+        rgb, a = img[:, :, :3], img[:, :, 3:4]
+        straight = np.divide(rgb, a, out=np.zeros_like(rgb), where=a > 1e-6)
+        img[:, :, :3] = np.power(np.maximum(straight, 0.0), 1.0 / gamma) * a
+        cv2.imwrite(str(out), img, [cv2.IMWRITE_EXR_TYPE, cv2.IMWRITE_EXR_TYPE_HALF])
+        print(f"\r  gamma {gamma} copy {i + 1}/{len(files)}", end="", flush=True)
+    print(flush=True)
 
 
 def place_result(project, timeline, shot_dir: Path, start: int, out_track: int) -> None:
     media_pool = project.GetMediaPool()
     clip, n_out = import_sequence(media_pool, shot_dir / "Output" / "Processed")
-    tag_linear(clip)
+    if not tag_linear(clip):
+        print("Resolve keeps a display gamma on this clip; importing a gamma 2.4 copy instead.", flush=True)
+        media_pool.DeleteClips([clip])
+        baked = shot_dir / "Output" / "Processed_g24"
+        bake_gamma(shot_dir / "Output" / "Processed", baked)
+        clip, n_out = import_sequence(media_pool, baked)
+        if _has(clip, "Alpha mode"):
+            _set_first(clip, "Alpha mode", ("Premultiplied",))
 
     while timeline.GetTrackCount("video") < out_track:
         timeline.AddTrack("video")
