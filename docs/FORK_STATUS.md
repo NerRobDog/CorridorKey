@@ -17,9 +17,15 @@ Branch: `claude/modest-cray-e5c1pv`. Always run with `uv run --extra mlx ...` (a
 - **Scripts menu buttons**: `uv run python scripts/install_resolve_menu.py` (Workspace > Scripts).
 
 ## Open / to verify
-- Gamma on import: Resolve's API refuses `Input Gamma = Linear` (tried Linear, Linear Light,
-  Linear Scene). The bridge now imports a gamma-2.4 copy (`Output/Processed_g24`) instead —
-  **not yet confirmed in Resolve.** Values above 1.0 are less exact in that copy.
+- ~~Gamma on import~~ **confirmed visually** (Resolve Studio 21.1, DWG colour-managed v2 project,
+  2026-09-29): the gamma-2.4 copy (`Output/Processed_g24`) on V3 matches the plate on V1.
+  `Input Gamma` is read-only through `SetClipProperty` for EXR clips — every value is refused
+  (Linear, Linear Light, Gamma 2.4, sRGB, …) whatever `Input Color Space` is set to; `Input Color
+  Space` itself accepts `Rec.709 (Scene)` and `Linear`. Values above 1.0 are less exact in the copy.
+- Vision `person` hints drop limbs and bodies in motion-blurred frames (36 of 170 frames on the
+  test shot lose > 15 % of the foreground); `objects` mode loses far less. Hint work in progress.
+- Full bridge run on the test shot (1080p, 170 frames): 11.4 s/frame keying, vs ≈ 5 s in the
+  synthetic benchmark — not yet explained.
 - Menu buttons: not yet tried inside Resolve (macOS will ask to let Resolve control Terminal).
 - Repeat the full 6K measurement.
 - Colour notes: `Processed` = linear Rec.709 premultiplied RGBA EXR; `FG` = sRGB straight, not despilled.
