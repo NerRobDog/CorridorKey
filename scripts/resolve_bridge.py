@@ -290,26 +290,37 @@ def main() -> None:
 
 
 # Property names and values differ between Resolve versions and colour-management modes; try each, keep what sticks.
-CLIP_TAGS = (
-    ("Alpha mode", ("Premultiplied",)),
-    ("Input Color Space", ("Rec.709 Linear", "Linear", "Rec.709 (Scene) Linear")),
-    ("Input Gamma", ("Linear",)),
-)
+# With separate primaries and gamma (Input Gamma present) the gamma is set first, then plain Rec.709 primaries.
+LINEAR_GAMMAS = ("Linear", "Linear Light", "Linear Scene")
+COMBINED_SPACES = ("Rec.709 Linear", "Linear", "Rec.709 (Scene) Linear")
+PRIMARIES = ("Rec.709", "Rec.709 (Scene)")
+
+
+def _set_first(clip, key: str, values) -> bool:
+    for value in values:
+        if clip.SetClipProperty(key, value) and clip.GetClipProperty(key) == value:
+            print(f"  {key}: {value}", flush=True)
+            return True
+    print(f"  {key}: could not set (stays '{clip.GetClipProperty(key)}'), tried {', '.join(values)}", flush=True)
+    return False
+
+
+def _has(clip, key: str) -> bool:
+    return clip.GetClipProperty(key) not in (None, "")
 
 
 def tag_linear(clip) -> None:
     """Tag the imported EXRs as linear Rec.709 premultiplied, so nobody has to fix the gamma by hand."""
-    for key, values in CLIP_TAGS:
-        before = clip.GetClipProperty(key)
-        if before is None or before == "":
-            continue  # this Resolve/project has no such attribute
-        for value in values:
-            if clip.SetClipProperty(key, value) and clip.GetClipProperty(key) == value:
-                print(f"  {key}: {value}", flush=True)
-                break
-        else:
-            now = clip.GetClipProperty(key)
-            print(f"  {key}: could not set (stays '{now}'), set it to {values[0]} by hand", flush=True)
+    if _has(clip, "Alpha mode"):
+        _set_first(clip, "Alpha mode", ("Premultiplied",))
+    if _has(clip, "Input Gamma"):
+        _set_first(clip, "Input Gamma", LINEAR_GAMMAS)
+        if _has(clip, "Input Color Space"):
+            _set_first(clip, "Input Color Space", PRIMARIES)
+            if clip.GetClipProperty("Input Gamma") not in LINEAR_GAMMAS:  # setting primaries may reset gamma
+                _set_first(clip, "Input Gamma", LINEAR_GAMMAS)
+    elif _has(clip, "Input Color Space"):
+        _set_first(clip, "Input Color Space", COMBINED_SPACES)
 
 
 def place_result(project, timeline, shot_dir: Path, start: int, out_track: int) -> None:
