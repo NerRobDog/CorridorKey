@@ -1168,3 +1168,26 @@ def test_appledouble_files_are_not_frames():
 
     assert is_image_file("shot_0001.tif")
     assert not is_image_file("._shot_0001.tif")
+
+
+def test_skip_existing_works_without_comp(tmp_path):
+    """--skip-existing must recognise finished frames when comp previews are off (--no-comp)."""
+    from unittest.mock import patch
+
+    from clip_manager import InferenceSettings, run_inference
+
+    clip = _write_jpg_clip(tmp_path, "01_green", (0.05, 0.85, 0.10))
+    engine = MagicMock()
+    engine.process_frame.return_value = {
+        "alpha": np.zeros((64, 64, 1), dtype=np.float32),
+        "fg": np.zeros((64, 64, 3), dtype=np.float32),
+        "comp": None,
+        "processed": np.zeros((64, 64, 4), dtype=np.float32),
+    }
+    settings = InferenceSettings(screen_color="green", generate_comp=False)
+    with patch("CorridorKeyModule.backend.create_engine", return_value=engine):
+        run_inference([clip], device="cpu", settings=settings)
+        first = engine.process_frame.call_count
+        run_inference([clip], device="cpu", settings=settings, skip_existing=True)
+    assert first > 0
+    assert engine.process_frame.call_count == first

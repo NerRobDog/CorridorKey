@@ -834,7 +834,12 @@ def run_inference(
             else:
                 expected_stem = os.path.splitext(input_files[i])[0]
 
-            if skip_existing and os.path.exists(os.path.join(comp_dir, f"{expected_stem}.png")):
+            # Processed is written last; the comp preview only counts when comps are being made.
+            if (
+                skip_existing
+                and os.path.exists(os.path.join(proc_dir, f"{expected_stem}.exr"))
+                and (not settings.generate_comp or os.path.exists(os.path.join(comp_dir, f"{expected_stem}.png")))
+            ):
                 logger.debug("Frame %d already rendered, skipping.", i)
                 skipped_count += 1
                 if on_frame_complete:
