@@ -1,0 +1,32 @@
+# Fork status (Apple Silicon + DaVinci Resolve) — handoff
+
+Branch: `claude/modest-cray-e5c1pv`. Always run with `uv run --extra mlx ...` (arm64 uv).
+
+## Done and confirmed on hardware
+- **MLX float engine** (`CorridorKeyModule/mlx_engine.py`): float32 end to end, honours `input_is_linear`,
+  tiled 768/64 + `mx.compile`, opaque core colour from the plate (no tile grid on 6K),
+  empty-tile skipping (96 px margin). MLX weights auto-converted from the Torch safetensors.
+- **Speed (M1 Pro 16 GB):** 1080p ≈ 5.3–5.7 s/frame; 6K ≈ 51 s/frame, ≈ 39 s with tile skipping.
+  Torch MPS was 324 s/frame. Vision hints: ≈ 0.17 s/frame 1080p, ≈ 1.1 s/frame 6K.
+- **Vision hints** (`CorridorKeyModule/vision_hint.py`): person / objects, eroded + feathered PNGs.
+- **`ck` wrapper** (`scripts/ck.py` + `ck`): drag a plate folder, finds or generates the hint,
+  `--test` (10 frames), stale-output guard (`ck_recipe.json`), ignores `._` files, checks truncated frames.
+- **Resolve bridge** (`scripts/resolve_bridge.py`): V1 plate under the playhead → render → key → V3.
+  `--auto-hint [person|objects]` (no V2 needed), `--import-only`, check that a V2 render is a matte,
+  old `Output` moved to `Output_prev_<stamp>` before keying.
+- **Scripts menu buttons**: `uv run python scripts/install_resolve_menu.py` (Workspace > Scripts).
+
+## Open / to verify
+- Gamma on import: Resolve's API refuses `Input Gamma = Linear` (tried Linear, Linear Light,
+  Linear Scene). The bridge now imports a gamma-2.4 copy (`Output/Processed_g24`) instead —
+  **not yet confirmed in Resolve.** Values above 1.0 are less exact in that copy.
+- Menu buttons: not yet tried inside Resolve (macOS will ask to let Resolve control Terminal).
+- Repeat the full 6K measurement.
+- Colour notes: `Processed` = linear Rec.709 premultiplied RGBA EXR; `FG` = sRGB straight, not despilled.
+  Plates: Rec.709/sRGB 16-bit TIFF. Hints: white on black, no alpha channel.
+
+## Next (tracker)
+5 LAN render farm (coordinator — local session) · 3 MLX attention (head_dim 56) · 4 fp16 on CPU ·
+6 MCP part of the bridge · 9 subject crop · 10 TTA · 11 temporal stabilisation · 13 hint propagation ·
+14 self-check / clean plate · 15 screen spill-light pass · 16 depth pass · 17 auto-tuning ·
+18 LoRA · 19 shared farm with credits · 7 iPad worker (optional).
