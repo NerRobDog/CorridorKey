@@ -22,10 +22,17 @@ Branch: `claude/modest-cray-e5c1pv`. Always run with `uv run --extra mlx ...` (a
   `Input Gamma` is read-only through `SetClipProperty` for EXR clips — every value is refused
   (Linear, Linear Light, Gamma 2.4, sRGB, …) whatever `Input Color Space` is set to; `Input Color
   Space` itself accepts `Rec.709 (Scene)` and `Linear`. Values above 1.0 are less exact in the copy.
-- Vision `person` hints drop limbs and bodies in motion-blurred frames (36 of 170 frames on the
-  test shot lose > 15 % of the foreground); `objects` mode loses far less. Hint work in progress.
-- Full bridge run on the test shot (1080p, 170 frames): 11.4 s/frame keying, vs ≈ 5 s in the
-  synthetic benchmark — not yet explained.
+- Vision hints drop limbs and bodies in motion-blurred frames: on the test shot (`A_4-6/1`, 170
+  frames) `person` loses > 15 % of the foreground on 36 frames, `objects` on 34 (different ones).
+  New `--auto-hint screen` (rough chroma key, `vision_hint.screen_mask`) fixed all of them in a
+  re-key of 11 of the worst frames: whole bodies, motion-blurred hands semi-transparent, no debris.
+  It keys everyone in front of the screen (extras, Spider-Man). The user found a Resolve 3D Keyer
+  V2 hint best in their own tests; automating it via `Graph.ApplyGradeFromDRX` is open.
+- Default `--auto-hint` mode is still `person`; switching it to `screen` is open.
+- Fixed: `--skip-existing` ignored finished frames under `--no-comp`, so every bridge run re-keyed
+  every shot in `ClipsForInference`.
+- Keying speed with Resolve open: 11.4 s/frame (full run), ≈ 45 s/frame on an 11-frame re-key,
+  vs ≈ 5 s in the synthetic benchmark. Resolve sharing the GPU is the suspect — not measured.
 - Menu buttons: not yet tried inside Resolve (macOS will ask to let Resolve control Terminal).
 - Repeat the full 6K measurement.
 - Colour notes: `Processed` = linear Rec.709 premultiplied RGBA EXR; `FG` = sRGB straight, not despilled.
