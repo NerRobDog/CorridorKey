@@ -374,7 +374,7 @@ def place_result(project, timeline, shot_dir: Path, start: int, out_track: int) 
             {
                 "mediaPoolItem": clip,
                 "startFrame": 0,
-                "endFrame": n_out - 1,
+                "endFrame": n_out,  # exclusive: n_out - 1 drops the last frame (checked in Resolve 21.1)
                 "trackIndex": out_track,
                 "recordFrame": start,
             }
