@@ -21,8 +21,10 @@ MENU_DIR = Path.home() / "Library/Application Support/Blackmagic Design/DaVinci 
 VISION = "--with pyobjc-framework-Vision --with pyobjc-framework-Quartz"
 
 BUTTONS = {
-    "CorridorKey - Vision hint (person)": f"uv run --extra mlx {VISION} python scripts/resolve_bridge.py --auto-hint",
     "CorridorKey - Screen hint (chroma)": "uv run --extra mlx python scripts/resolve_bridge.py --auto-hint screen",
+    "CorridorKey - Vision hint (person)": (
+        f"uv run --extra mlx {VISION} python scripts/resolve_bridge.py --auto-hint person"
+    ),
     "CorridorKey - Vision hint (objects)": (
         f"uv run --extra mlx {VISION} python scripts/resolve_bridge.py --auto-hint objects"
     ),

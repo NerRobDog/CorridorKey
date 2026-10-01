@@ -11,10 +11,14 @@ Run it from a terminal while Resolve Studio is open (external scripting needs St
 
     uv run --extra mlx python scripts/resolve_bridge.py
 
-or, with the hint made by Apple Vision instead of V2:
+or, with no V2: the hint made by a rough chroma key of the screen
+
+    uv run --extra mlx python scripts/resolve_bridge.py --auto-hint
+
+or by Apple Vision (drops motion-blurred limbs more often, but keys only people/objects):
 
     uv run --extra mlx --with pyobjc-framework-Vision --with pyobjc-framework-Quartz \\
-        python scripts/resolve_bridge.py --auto-hint
+        python scripts/resolve_bridge.py --auto-hint person
 
 What it does, for the V1 clip under the playhead:
   1. renders the plate range with only V1 enabled  -> ClipsForInference/<shot>/Input/
@@ -235,10 +239,10 @@ def main() -> None:
     p.add_argument(
         "--auto-hint",
         nargs="?",
-        const="person",
-        choices=("person", "objects", "screen"),
-        help="no V2 needed: make the hint with Apple Vision (person, default, or objects) "
-        "or with a rough chroma key of the screen (screen)",
+        const="screen",
+        choices=("screen", "person", "objects"),
+        help="no V2 needed: make the hint with a rough chroma key of the screen (screen, default) "
+        "or with Apple Vision (person, objects)",
     )
     args = p.parse_args()
 

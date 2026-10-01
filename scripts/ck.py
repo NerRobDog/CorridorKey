@@ -166,9 +166,9 @@ def main() -> None:
     p.add_argument("--test", action="store_true", help="only the first 10 frames, to check the key")
     p.add_argument(
         "--auto-hint",
-        choices=("person", "objects", "screen"),
-        help="generate the hint with Apple Vision (person, objects) or a rough chroma key (screen); "
-        "default when no hint folder is found: person",
+        choices=("screen", "person", "objects"),
+        help="generate the hint with a rough chroma key (screen) or Apple Vision (person, objects); "
+        "default when no hint folder is found: screen",
     )
     args = p.parse_args()
 
@@ -184,7 +184,7 @@ def main() -> None:
     elif not args.auto_hint:
         hint = find_hint(shot)
     if hint is None:
-        hint = auto_hint(plate, work / "AlphaHint", args.auto_hint or "person")
+        hint = auto_hint(plate, work / "AlphaHint", args.auto_hint or "screen")
     else:
         link(hint, work / "AlphaHint")
 

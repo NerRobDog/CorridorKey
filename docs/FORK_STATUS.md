@@ -28,7 +28,8 @@ Branch: `claude/modest-cray-e5c1pv`. Always run with `uv run --extra mlx ...` (a
   re-key of 11 of the worst frames: whole bodies, motion-blurred hands semi-transparent, no debris.
   It keys everyone in front of the screen (extras, Spider-Man). The user found a Resolve 3D Keyer
   V2 hint best in their own tests; automating it via `Graph.ApplyGradeFromDRX` is open.
-- Default `--auto-hint` mode is still `person`; switching it to `screen` is open.
+- `--auto-hint` defaults to `screen` (bridge, ck, first menu button). The 3D Keyer V2 hint stays
+  manual on purpose: screens differ too much between shots for one saved grade (owner's decision).
 - Fixed: `--skip-existing` ignored finished frames under `--no-comp`, so every bridge run re-keyed
   every shot in `ClipsForInference`.
 - Keying speed with Resolve open: 11.4 s/frame (full run), ≈ 45 s/frame on an 11-frame re-key,
